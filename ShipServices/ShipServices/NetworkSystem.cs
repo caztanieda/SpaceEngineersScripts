@@ -41,6 +41,7 @@ namespace IngameScript
             void update(float dt);
             void update10();
             void update100();
+            void update500();
             void incomeMessage(string message);
         }
 
@@ -49,6 +50,7 @@ namespace IngameScript
             virtual public void update(float dt) { }
             virtual public void update10() { }
             virtual public void update100() { }
+            virtual public void update500() { }
             virtual public void incomeMessage(string message) { }
         }
         #endregion //BaseService
@@ -57,15 +59,16 @@ namespace IngameScript
         #region NetworkPacket
         public class NetworkPacket
         {
+            const char delimiter = '#';
             public NetworkPacket(string rawData)
             {
-                string[] splitData = rawData.Split(',');
+                string[] splitData = rawData.Split(delimiter);
                 if (splitData.Count() == 5)
                 {
-                    type = splitData[0];
+                    Enum.TryParse(splitData[0], out type);
                     to = splitData[1];
                     from = splitData[2];
-                    code = splitData[3];
+                    Enum.TryParse(splitData[3], out code);
                     data = splitData[4];
                 }
                 else
@@ -74,7 +77,7 @@ namespace IngameScript
                 }
             }
 
-            public NetworkPacket(string type, string to, string from, string code, string data)
+            public NetworkPacket(NetworkPacketType type, string to, string from, NetworkStatusCode code, string data)
             {
                 this.type = type;
                 this.to = to;
@@ -83,34 +86,54 @@ namespace IngameScript
                 this.data = data;
             }
 
-            public string deserialize()
+            public string serialize()
             {
-                return type + "," + to + "," + from + "," + code + "," + data;
+                return type.ToString() + delimiter + to + delimiter + from + delimiter + code.ToString() + delimiter + data;
             }
 
-            public string type;
+            public NetworkPacketType type;
             public string to;
             public string from;
-            public string code;
+            public NetworkStatusCode code;
             public string data;
         }
 
-        public class NetworkStatusCode
+        public enum NetworkStatusCode
         {
-            public static string OK = "OK";
-            public static string TIMEOUT = "TIMEOUT";
-            public static string WRONG_PACKET = "WRONG_PACKET";
+            OK,
+            TIMEOUT,
+            WRONG_PACKET
         }
-        #endregion //#NetworkPacket
 
+        public enum NetworkPacketType
+        {
+            BROADCAST,
+            BROADCAST_RESPONSE,
+            PING,
+            PING_RESPONSE,
+            REQUEST,
+            RESPONSE,
+            UDP
+        }
+
+        #endregion //#NetworkPacket
+        #region NetworkCommands
+        public interface INetworkCommand
+        {
+            string serialize();
+            void deserialize(string data);
+        }
+#endregion //NetworkCommands
         public class NetworkService : BaseShipService
         {
             IMyTextPanel debugTextPanel;
             IMyRadioAntenna antenna;
             IMyGridTerminalSystem GTS;
             string networkName;
-            List<string> network;
             string groupName;
+            bool isScanningNetwork = false;
+
+            public List<string> network;
 
             public NetworkService(IMyGridTerminalSystem GTS, string networkName)
             {
@@ -118,33 +141,83 @@ namespace IngameScript
                 this.networkName = networkName;
                 network = new List<string>();
                 groupName = "[NetworkService]";
+                init();
             }
 
             void init()
             {
                 findRequiredBlocks();
                 renameBlocks();
-                scanNetwork();
+                //scanNetwork();
             }
 
-            override public void update100()
+            override public void update500()
             {
                 //reinit
                 init();
             }
 
-            public override void incomeMessage(string message)
+            public override void update10()
             {
-                debugTextPanel?.WritePublicText(message + "\n", true);
-                Log("Raw message:" + message);
-                NetworkPacket packet = new NetworkPacket(message);
-                Log("Message from" + packet.from + " to "+ packet.to + " data" + packet.data);
+                if(isScanningNetwork)
+                {
+                    isScanningNetwork = false;
+                    onScanNetworkComplete();
+                }
             }
 
-            void scanNetwork()
+            public override void incomeMessage(string message)
             {
-                NetworkPacket packet = new NetworkPacket("PING", "", networkName, NetworkStatusCode.OK, "Test data");
-                antenna.TransmitMessage(packet.deserialize(), MyTransmitTarget.Everyone);
+                NetworkPacket packet = new NetworkPacket(message);
+
+                if (packet.to == networkName || packet.type == NetworkPacketType.BROADCAST)
+                {
+                    debugTextPanel?.WritePublicText(message + "\n", true);
+                }
+
+                if(packet.type == NetworkPacketType.BROADCAST)
+                {
+                    sendPacket(NetworkPacketType.BROADCAST_RESPONSE, packet.from);
+                }
+
+                if (packet.to == networkName)
+                {
+                    if (packet.type == NetworkPacketType.PING)
+                    {
+                        sendPacket(NetworkPacketType.PING_RESPONSE, packet.from);
+                    }
+                    else if (packet.type == NetworkPacketType.BROADCAST_RESPONSE)
+                    {
+                        if (network.Contains(packet.from) == false)
+                        {
+                            network.Add(packet.from);
+                        }
+                    }
+                    else if (packet.type == NetworkPacketType.REQUEST)
+                    {
+
+                    }
+                }
+            }
+
+            public void scanNetwork()
+            {
+                isScanningNetwork = true;
+                sendPacket(NetworkPacketType.BROADCAST);
+            }
+
+            void onScanNetworkComplete()
+            {
+                foreach (string name in network)
+                {
+                    debugTextPanel?.WritePublicText(name + "\n", true);
+                }
+            }
+
+            void sendPacket(NetworkPacketType packetType, string to = "", string data = "")
+            {
+                NetworkPacket packet = new NetworkPacket(packetType, to, networkName, NetworkStatusCode.OK, data);
+                antenna.TransmitMessage(packet.serialize(), MyTransmitTarget.Everyone);
             }
 
             void findRequiredBlocks()
@@ -169,8 +242,13 @@ namespace IngameScript
             {
                 if (antenna != null)
                 {
-                    antenna.CustomName = groupName + " Antenna";
+                    antenna.CustomName = groupName + " Antenna (" + networkName + ")";
                 }
+            }
+
+            public void sendRequest(string to, string data, Action<string> responce)
+            {
+
             }
         }
         #endregion //NetworkService
@@ -181,12 +259,15 @@ namespace IngameScript
 
         List<IShipService> shipServices = new List<IShipService>();
 
+        NetworkService networkService = null;
+
         public Program()
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
             GTS = GridTerminalSystem;
             Log = Echo;
-            shipServices.Add(new NetworkService(GTS, "rocket"));
+            networkService = new NetworkService(GTS, generateUniqueNetworkName());
+            shipServices.Add(networkService);
         }
 
         public void Save()
@@ -194,14 +275,16 @@ namespace IngameScript
             
         }
         
-        struct TestSerialization
+        string generateUniqueNetworkName()
         {
-            public int a;
-            public string str;
+            return "ship [" + Me.WorldMatrix.Translation.ToString().GetHashCode() + "]";
         }
+
+        int executionCounter = 0;
 
         public void Main(string argument, UpdateType updateSource)
         {
+            executionCounter++;
             foreach (IShipService service in shipServices)
             {
                 if ((updateSource & UpdateType.Update1) != 0)
@@ -219,9 +302,19 @@ namespace IngameScript
                     service.update100();
                 }
 
+                if(executionCounter % 500 == 0)
+                {
+                    service.update500();
+                }
+
                 if (updateSource == UpdateType.Antenna)
                 {
                     service.incomeMessage(argument);
+                }
+
+                if (updateSource == UpdateType.Trigger)
+                {
+                    networkService?.scanNetwork();
                 }
             }
         }
