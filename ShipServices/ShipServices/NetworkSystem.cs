@@ -47,6 +47,7 @@ namespace IngameScript
 
         public class BaseShipService : IShipService
         {
+            protected string groupName;
             virtual public void update(float dt) { }
             virtual public void update10() { }
             virtual public void update100() { }
@@ -63,13 +64,14 @@ namespace IngameScript
             public NetworkPacket(string rawData)
             {
                 string[] splitData = rawData.Split(delimiter);
-                if (splitData.Count() == 5)
+                if (splitData.Count() == 6)
                 {
-                    Enum.TryParse(splitData[0], out type);
-                    to = splitData[1];
-                    from = splitData[2];
-                    Enum.TryParse(splitData[3], out code);
-                    data = splitData[4];
+                    int.TryParse(splitData[0], out id);
+                    Enum.TryParse(splitData[1], out type);
+                    to = splitData[2];
+                    from = splitData[3];
+                    Enum.TryParse(splitData[4], out code);
+                    data = splitData[5];
                 }
                 else
                 {
@@ -77,8 +79,9 @@ namespace IngameScript
                 }
             }
 
-            public NetworkPacket(NetworkPacketType type, string to, string from, NetworkStatusCode code, string data)
+            public NetworkPacket(int id, NetworkPacketType type, string to, string from, NetworkStatusCode code, string data)
             {
+                this.id = id;
                 this.type = type;
                 this.to = to;
                 this.from = from;
@@ -88,9 +91,10 @@ namespace IngameScript
 
             public string serialize()
             {
-                return type.ToString() + delimiter + to + delimiter + from + delimiter + code.ToString() + delimiter + data;
+                return id.ToString() + delimiter + type.ToString() + delimiter + to + delimiter + from + delimiter + code.ToString() + delimiter + data;
             }
 
+            public int id;
             public NetworkPacketType type;
             public string to;
             public string from;
@@ -117,13 +121,7 @@ namespace IngameScript
         }
 
         #endregion //#NetworkPacket
-        #region NetworkCommands
-        public interface INetworkCommand
-        {
-            string serialize();
-            void deserialize(string data);
-        }
-#endregion //NetworkCommands
+
         public interface IRequestListener
         {
             void request(NetworkPacket packet);
@@ -131,18 +129,18 @@ namespace IngameScript
 
         public class NetworkService : BaseShipService
         {
-            IMyTextPanel debugTextPanel;
             IMyRadioAntenna antenna;
             IMyGridTerminalSystem GTS;
             string networkName;
-            string groupName;
+            
             bool isScanningNetwork = false;
 
             public List<string> network;
             private List<IRequestListener> requestListeners;
-            private Dictionary<string, Action<string>> responseListeners;
-            private Dictionary<string, int> responseTimers;
+            private Dictionary<int, Action<NetworkPacket>> responseListeners;
+            private Dictionary<int, int> responseTimers;
             private List<NetworkPacket> packetsToSend;
+            private int idGenerator;
 
             public NetworkService(IMyGridTerminalSystem GTS, string networkName)
             {
@@ -151,8 +149,8 @@ namespace IngameScript
                 network = new List<string>();
                 groupName = "[NetworkService]";
                 requestListeners = new List<IRequestListener>();
-                responseListeners = new Dictionary<string, Action<string>>();
-                responseTimers = new Dictionary<string, int>();
+                responseListeners = new Dictionary<int, Action<NetworkPacket>>();
+                responseTimers = new Dictionary<int, int>();
                 packetsToSend = new List<NetworkPacket>();
                 init();
             }
@@ -171,12 +169,12 @@ namespace IngameScript
 
             public override void update(float dt)
             {
-                if (packetsToSend.Count > 0)
+                if (antenna != null && packetsToSend.Count > 0)
                 {
                     var packet = packetsToSend.First();
                     antenna.TransmitMessage(packet.serialize(), MyTransmitTarget.Everyone);
+                    Log("Send packet: " + packet.serialize());
                     packetsToSend.Remove(packet);
-                    debugTextPanel?.WritePublicText("Send packet: " + packet.serialize() + "\n", true);
                 }
             }
 
@@ -197,16 +195,23 @@ namespace IngameScript
 
             public override void update100()
             {
-                foreach(var kv in responseTimers)
+                List<int> timersToRemove = new List<int>();
+                foreach(var key in responseTimers.Keys.ToList())
                 {
-                    int timer = kv.Value;
-                    timer--;
+                    responseTimers[key]--;
+                    int timer = responseTimers[key];
                     if(timer <= 0)
                     {
-                        responseListeners[kv.Key].Invoke("request timeout");
-                        responseListeners.Remove(kv.Key);
+                        responseListeners[key].Invoke(new NetworkPacket(key, NetworkPacketType.RESPONSE, "", "", NetworkStatusCode.TIMEOUT, ""));
+                        responseListeners.Remove(key);
+                        timersToRemove.Add(key);
                         break;
                     }
+                }
+
+                foreach (int key in timersToRemove)
+                {
+                    responseTimers.Remove(key);
                 }
             }
 
@@ -216,19 +221,19 @@ namespace IngameScript
 
                 if (packet.to == networkName || packet.type == NetworkPacketType.BROADCAST)
                 {
-                    debugTextPanel?.WritePublicText(message + "\n", true);
+                    Log("Recieved packed:" + message);
                 }
 
                 if(packet.type == NetworkPacketType.BROADCAST)
                 {
-                    sendPacket(NetworkPacketType.BROADCAST_RESPONSE, packet.from);
+                    sendPacket(generateId(), NetworkPacketType.BROADCAST_RESPONSE, packet.from);
                 }
 
                 if (packet.to == networkName)
                 {
                     if (packet.type == NetworkPacketType.PING)
                     {
-                        sendPacket(NetworkPacketType.PING_RESPONSE, packet.from);
+                        sendPacket(generateId(), NetworkPacketType.PING_RESPONSE, packet.from);
                     }
                     else if (packet.type == NetworkPacketType.BROADCAST_RESPONSE)
                     {
@@ -243,11 +248,11 @@ namespace IngameScript
                     }
                     else if (packet.type == NetworkPacketType.RESPONSE)
                     {
-                        if (responseListeners.ContainsKey(packet.from))
+                        if (responseListeners.ContainsKey(packet.id))
                         {
-                            responseListeners[packet.from].Invoke(packet.data);
-                            responseListeners.Remove(packet.from);
-                            responseTimers.Remove(packet.from);
+                            responseListeners[packet.id].Invoke(packet);
+                            responseListeners.Remove(packet.id);
+                            responseTimers.Remove(packet.id);
                         }
                     }
                 }
@@ -264,20 +269,20 @@ namespace IngameScript
             public void scanNetwork()
             {
                 isScanningNetwork = true;
-                sendPacket(NetworkPacketType.BROADCAST);
+                sendPacket(generateId(), NetworkPacketType.BROADCAST);
             }
 
             void onScanNetworkComplete()
             {
                 foreach (string name in network)
                 {
-                    debugTextPanel?.WritePublicText(name + "\n", true);
+                    Log(name);
                 }
             }
 
-            void sendPacket(NetworkPacketType packetType, string to = "", string data = "")
+            void sendPacket(int id, NetworkPacketType packetType, string to = "", string data = "")
             {
-                NetworkPacket packet = new NetworkPacket(packetType, to, networkName, NetworkStatusCode.OK, data);
+                NetworkPacket packet = new NetworkPacket(id, packetType, to, networkName, NetworkStatusCode.OK, data);
                 packetsToSend.Add(packet);
             }
 
@@ -286,17 +291,13 @@ namespace IngameScript
                 IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
 
                 List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-                groupBlocks.GetBlocksOfType<IMyRadioAntenna>(blocks);
+                groupBlocks?.GetBlocksOfType<IMyRadioAntenna>(blocks);
 
                 blocks.ForEach(b => antenna = b as IMyRadioAntenna);
                 if(antenna==null)
                 {
                     Log(groupName + ": Can't find antenna");
                 }
-
-                groupBlocks.GetBlocksOfType<IMyTextPanel>(blocks);
-                blocks.ForEach(b => debugTextPanel = b as IMyTextPanel);
-                
             }
 
             void renameBlocks()
@@ -307,17 +308,25 @@ namespace IngameScript
                 }
             }
 
-            public void sendRequest(string to, string data, Action<string> response)
+            public void sendRequest(string to, string data, Action<NetworkPacket> response)
             {
-                responseListeners.Add(to, response);
-                int TIMEOUT = 3;
-                responseTimers.Add(to, TIMEOUT);
-                sendPacket(NetworkPacketType.REQUEST, to, data);
+                int id = generateId();
+                responseListeners.Add(id, response);
+                int TIMEOUT = 2;
+                
+                responseTimers.Add(id, TIMEOUT);
+                
+                sendPacket(id, NetworkPacketType.REQUEST, to, data);
             }
 
-            public void sendResponse(string to, string data)
+            public void sendResponse(int requestId, string to, string data)
             {
-                sendPacket(NetworkPacketType.RESPONSE, to, data);
+                sendPacket(requestId, NetworkPacketType.RESPONSE, to, data);
+            }
+
+            int generateId()
+            {
+                return idGenerator++;
             }
         }
 
@@ -333,13 +342,62 @@ namespace IngameScript
 
             public void request(NetworkPacket packet)
             {
-                networkService.sendResponse(packet.from, "<<RESPONCE>>");
+                networkService.sendResponse(packet.id, packet.from, "<<RESPONCE DATA ID:" + packet.id +">>");
             }
         }
 
         TestListener testListener;
 
         #endregion //NetworkService
+
+#region DebugScreenService
+        class DebugScreenService : BaseShipService
+        {
+            IMyTextPanel debugTextPanel;
+            IMyGridTerminalSystem GTS;
+
+            public DebugScreenService(IMyGridTerminalSystem GTS)
+            {
+                groupName = "[DebugScreenService]";
+                this.GTS = GTS;
+                init();
+                debugTextPanel?.WritePublicText("", false);
+            }
+
+            public void Log(string text)
+            {
+                debugTextPanel?.WritePublicText(text + "\n", true);
+            }
+
+            void init()
+            {
+                findRequiredBlocks();
+                renameBlocks();
+            }
+
+            public override void update500()
+            {
+                //reinit
+                init();
+            }
+
+            void findRequiredBlocks()
+            {
+                List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
+                IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
+                groupBlocks?.GetBlocksOfType<IMyTextPanel>(blocks);
+                blocks.ForEach(b => debugTextPanel = b as IMyTextPanel);
+            }
+
+            void renameBlocks()
+            {
+                if (debugTextPanel != null)
+                {
+                    debugTextPanel.CustomName = groupName + " LCD";
+                }
+            }
+        }
+#endregion //DebugScreenService
 
         IMyGridTerminalSystem GTS;
 
@@ -351,9 +409,11 @@ namespace IngameScript
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
             GTS = GridTerminalSystem;
-            Log = Echo;
+            DebugScreenService debugService = new DebugScreenService(GTS);
+            Log = (string text ) => { debugService.Log(text); };
             networkService = new NetworkService(GTS, generateUniqueNetworkName());
             shipServices.Add(networkService);
+            shipServices.Add(debugService);
             testListener = new TestListener(networkService);
         }
 
@@ -371,45 +431,57 @@ namespace IngameScript
 
         public void Main(string argument, UpdateType updateSource)
         {
-            executionCounter++;
-            foreach (IShipService service in shipServices)
+            try
             {
-                if ((updateSource & UpdateType.Update1) != 0)
+                executionCounter++;
+                foreach (IShipService service in shipServices)
                 {
-                    service.update((float)Runtime.TimeSinceLastRun.TotalSeconds);
+                    if ((updateSource & UpdateType.Update1) != 0)
+                    {
+                        service.update((float)Runtime.TimeSinceLastRun.TotalSeconds);
+                    }
+
+                    if ((updateSource & UpdateType.Update10) != 0)
+                    {
+                        service.update10();
+                    }
+
+                    if ((updateSource & UpdateType.Update100) != 0)
+                    {
+                        service.update100();
+                    }
+
+                    if (executionCounter % 500 == 0)
+                    {
+                        service.update500();
+                    }
+
+                    if (updateSource == UpdateType.Antenna)
+                    {
+                        service.incomeMessage(argument);
+                    }
                 }
 
-                if ((updateSource & UpdateType.Update10) != 0)
+                if (updateSource == UpdateType.Trigger && argument == "request")
                 {
-                    service.update10();
-                }
-
-                if ((updateSource & UpdateType.Update100) != 0)
-                {
-                    service.update100();
-                }
-
-                if(executionCounter % 500 == 0)
-                {
-                    service.update500();
-                }
-
-                if (updateSource == UpdateType.Antenna)
-                {
-                    service.incomeMessage(argument);
-                }
-
-                if (updateSource == UpdateType.Trigger)
-                {
+                    Log("Scanning network...");
                     networkService?.scanNetwork();
+
                     if (networkService.network.Count > 0)
                     {
                         string to = networkService.network[0];
-                        networkService.sendRequest(to, "request to ", (string data) => {
-                            Echo("Responce");
+                        Log("Try to send request to: " + to);
+                        Log("Waiting responce...");
+                        networkService.sendRequest(to, "request to ", (NetworkPacket packet) =>
+                        {
+                            Log("Responce: " + packet.data + " Code:" + packet.code);
                         });
                     }
                 }
+            }
+            catch(Exception e)
+            {
+                Log(e.StackTrace);
             }
         }
 
