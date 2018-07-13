@@ -124,6 +124,11 @@ namespace IngameScript
             void deserialize(string data);
         }
 #endregion //NetworkCommands
+        public interface IRequestListener
+        {
+            void request(NetworkPacket packet);
+        }
+
         public class NetworkService : BaseShipService
         {
             IMyTextPanel debugTextPanel;
@@ -134,6 +139,10 @@ namespace IngameScript
             bool isScanningNetwork = false;
 
             public List<string> network;
+            private List<IRequestListener> requestListeners;
+            private Dictionary<string, Action<string>> responseListeners;
+            private Dictionary<string, int> responseTimers;
+            private List<NetworkPacket> packetsToSend;
 
             public NetworkService(IMyGridTerminalSystem GTS, string networkName)
             {
@@ -141,6 +150,10 @@ namespace IngameScript
                 this.networkName = networkName;
                 network = new List<string>();
                 groupName = "[NetworkService]";
+                requestListeners = new List<IRequestListener>();
+                responseListeners = new Dictionary<string, Action<string>>();
+                responseTimers = new Dictionary<string, int>();
+                packetsToSend = new List<NetworkPacket>();
                 init();
             }
 
@@ -149,6 +162,22 @@ namespace IngameScript
                 findRequiredBlocks();
                 renameBlocks();
                 //scanNetwork();
+            }
+
+            public void registerRequestListener(IRequestListener listener)
+            {
+                requestListeners.Add(listener);
+            }
+
+            public override void update(float dt)
+            {
+                if (packetsToSend.Count > 0)
+                {
+                    var packet = packetsToSend.First();
+                    antenna.TransmitMessage(packet.serialize(), MyTransmitTarget.Everyone);
+                    packetsToSend.Remove(packet);
+                    debugTextPanel?.WritePublicText("Send packet: " + packet.serialize() + "\n", true);
+                }
             }
 
             override public void update500()
@@ -163,6 +192,21 @@ namespace IngameScript
                 {
                     isScanningNetwork = false;
                     onScanNetworkComplete();
+                }
+            }
+
+            public override void update100()
+            {
+                foreach(var kv in responseTimers)
+                {
+                    int timer = kv.Value;
+                    timer--;
+                    if(timer <= 0)
+                    {
+                        responseListeners[kv.Key].Invoke("request timeout");
+                        responseListeners.Remove(kv.Key);
+                        break;
+                    }
                 }
             }
 
@@ -195,8 +239,25 @@ namespace IngameScript
                     }
                     else if (packet.type == NetworkPacketType.REQUEST)
                     {
-
+                        resendToListeners(packet);
                     }
+                    else if (packet.type == NetworkPacketType.RESPONSE)
+                    {
+                        if (responseListeners.ContainsKey(packet.from))
+                        {
+                            responseListeners[packet.from].Invoke(packet.data);
+                            responseListeners.Remove(packet.from);
+                            responseTimers.Remove(packet.from);
+                        }
+                    }
+                }
+            }
+
+            private void resendToListeners(NetworkPacket packet)
+            {
+                foreach(var listener in requestListeners)
+                {
+                    listener.request(packet);
                 }
             }
 
@@ -217,7 +278,7 @@ namespace IngameScript
             void sendPacket(NetworkPacketType packetType, string to = "", string data = "")
             {
                 NetworkPacket packet = new NetworkPacket(packetType, to, networkName, NetworkStatusCode.OK, data);
-                antenna.TransmitMessage(packet.serialize(), MyTransmitTarget.Everyone);
+                packetsToSend.Add(packet);
             }
 
             void findRequiredBlocks()
@@ -246,14 +307,39 @@ namespace IngameScript
                 }
             }
 
-            public void sendRequest(string to, string data, Action<string> responce)
+            public void sendRequest(string to, string data, Action<string> response)
             {
+                responseListeners.Add(to, response);
+                int TIMEOUT = 3;
+                responseTimers.Add(to, TIMEOUT);
+                sendPacket(NetworkPacketType.REQUEST, to, data);
+            }
 
+            public void sendResponse(string to, string data)
+            {
+                sendPacket(NetworkPacketType.RESPONSE, to, data);
             }
         }
+
+        public class TestListener : IRequestListener
+        {
+            NetworkService networkService;
+
+            public TestListener(NetworkService networkService)
+            {
+                this.networkService = networkService;
+                networkService.registerRequestListener(this);
+            }
+
+            public void request(NetworkPacket packet)
+            {
+                networkService.sendResponse(packet.from, "<<RESPONCE>>");
+            }
+        }
+
+        TestListener testListener;
+
         #endregion //NetworkService
-
-
 
         IMyGridTerminalSystem GTS;
 
@@ -268,6 +354,7 @@ namespace IngameScript
             Log = Echo;
             networkService = new NetworkService(GTS, generateUniqueNetworkName());
             shipServices.Add(networkService);
+            testListener = new TestListener(networkService);
         }
 
         public void Save()
@@ -315,6 +402,13 @@ namespace IngameScript
                 if (updateSource == UpdateType.Trigger)
                 {
                     networkService?.scanNetwork();
+                    if (networkService.network.Count > 0)
+                    {
+                        string to = networkService.network[0];
+                        networkService.sendRequest(to, "request to ", (string data) => {
+                            Echo("Responce");
+                        });
+                    }
                 }
             }
         }
