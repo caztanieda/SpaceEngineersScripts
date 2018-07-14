@@ -141,6 +141,8 @@ namespace IngameScript
             private Dictionary<int, int> responseTimers;
             private List<NetworkPacket> packetsToSend;
             private int idGenerator;
+            private Action onScanNetworkComplete;
+            private int ticksToCompleteScan = 0;
 
             public NetworkService(IMyGridTerminalSystem GTS, string networkName)
             {
@@ -159,7 +161,7 @@ namespace IngameScript
             {
                 findRequiredBlocks();
                 renameBlocks();
-                //scanNetwork();
+                //scanNetwork(()=>{ });
             }
 
             public void registerRequestListener(IRequestListener listener)
@@ -173,7 +175,7 @@ namespace IngameScript
                 {
                     var packet = packetsToSend.First();
                     antenna.TransmitMessage(packet.serialize(), MyTransmitTarget.Everyone);
-                    Log("Send packet: " + packet.serialize());
+                    //Log("Send packet: " + packet.serialize());
                     packetsToSend.Remove(packet);
                 }
             }
@@ -188,8 +190,12 @@ namespace IngameScript
             {
                 if(isScanningNetwork)
                 {
-                    isScanningNetwork = false;
-                    onScanNetworkComplete();
+                    ticksToCompleteScan--;
+                    if (ticksToCompleteScan <= 0)
+                    {
+                        isScanningNetwork = false;
+                        ScanNetworkComplete();
+                    }
                 }
             }
 
@@ -221,7 +227,7 @@ namespace IngameScript
 
                 if (packet.to == networkName || packet.type == NetworkPacketType.BROADCAST)
                 {
-                    Log("Recieved packed:" + message);
+                    //Log("Recieved packed:" + message);
                 }
 
                 if(packet.type == NetworkPacketType.BROADCAST)
@@ -266,18 +272,19 @@ namespace IngameScript
                 }
             }
 
-            public void scanNetwork()
+            public void scanNetwork(Action onComplete)
             {
+                int TICKS_COMPLETE_SCAN = 2;
+                ticksToCompleteScan = TICKS_COMPLETE_SCAN;
+                onScanNetworkComplete += onComplete;
                 isScanningNetwork = true;
                 sendPacket(generateId(), NetworkPacketType.BROADCAST);
             }
 
-            void onScanNetworkComplete()
+            void ScanNetworkComplete()
             {
-                foreach (string name in network)
-                {
-                    Log(name);
-                }
+                onScanNetworkComplete?.Invoke();
+                onScanNetworkComplete = null;
             }
 
             void sendPacket(int id, NetworkPacketType packetType, string to = "", string data = "")
@@ -465,7 +472,13 @@ namespace IngameScript
                 if (updateSource == UpdateType.Trigger && argument == "request")
                 {
                     Log("Scanning network...");
-                    networkService?.scanNetwork();
+                    networkService?.scanNetwork(()=> {
+                        Log("Scan completed");
+                        foreach (string name in networkService.network)
+                        {
+                            Log(name);
+                        }
+                    });
 
                     if (networkService.network.Count > 0)
                     {
