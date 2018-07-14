@@ -55,7 +55,7 @@ namespace IngameScript
             virtual public void incomeMessage(string message) { }
         }
         #endregion //BaseService
-
+        //------------ship services-------------
         #region NetworkService
         #region NetworkPacket
         public class NetworkPacket
@@ -130,7 +130,6 @@ namespace IngameScript
         public class NetworkService : BaseShipService
         {
             IMyRadioAntenna antenna;
-            IMyGridTerminalSystem GTS;
             string networkName;
             
             bool isScanningNetwork = false;
@@ -144,12 +143,11 @@ namespace IngameScript
             private Action onScanNetworkComplete;
             private int ticksToCompleteScan = 0;
 
-            public NetworkService(IMyGridTerminalSystem GTS, string networkName)
+            public NetworkService(string networkName)
             {
-                this.GTS = GTS;
                 this.networkName = networkName;
                 network = new List<string>();
-                groupName = "[NetworkService]";
+                groupName = "[Network Service]";
                 requestListeners = new List<IRequestListener>();
                 responseListeners = new Dictionary<int, Action<NetworkPacket>>();
                 responseTimers = new Dictionary<int, int>();
@@ -274,6 +272,7 @@ namespace IngameScript
 
             public void scanNetwork(Action onComplete)
             {
+                network.Clear();
                 int TICKS_COMPLETE_SCAN = 2;
                 ticksToCompleteScan = TICKS_COMPLETE_SCAN;
                 onScanNetworkComplete += onComplete;
@@ -357,16 +356,168 @@ namespace IngameScript
 
         #endregion //NetworkService
 
-#region DebugScreenService
+        #region FuelService
+        public class FuelService : BaseShipService
+        {
+            List<IMyGasGenerator> gasGenerators = new List<IMyGasGenerator>();
+            List<IMyReactor> reactors = new List<IMyReactor>();
+
+            public FuelService()
+            {
+                groupName = "[Fuel Service]";
+                init();
+            }
+
+            void init()
+            {
+                findRequiredBlocks();
+                renameBlocks();
+            }
+
+            override public void update100()
+            {
+
+                init();
+                if (gasGenerators != null && gasGenerators.Count > 1)
+                {
+                    sortOreOfType("Ice", gasGenerators);
+                }
+
+                if (reactors != null && reactors.Count > 1)
+                {
+                    sortOreOfType("Uranium", reactors);
+                }
+            }
+
+            void findRequiredBlocks()
+            {
+                IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
+
+                List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
+                groupBlocks.GetBlocksOfType(gasGenerators);
+                groupBlocks.GetBlocksOfType(reactors);
+            }
+
+            void renameBlocks()
+            {
+                for (int i = 0; i < gasGenerators.Count; i++)
+                {
+                    IMyGasGenerator gasGenerator = gasGenerators[i];
+                    gasGenerator.CustomName = groupName + " Gas Generator " + (i + 1);
+                }
+
+                for (int i = 0; i < reactors.Count; i++)
+                {
+                    IMyReactor reactor = reactors[i];
+                    reactor.CustomName = groupName + " Reactor " + (i + 1);
+                }
+            }
+        }
+        #endregion //FuelService
+
+        #region ParkingService
+        public class ParkingService : BaseShipService
+        {
+            float maxSensorDistance = 10f;
+            IMyLightingBlock lightingBlock = null;
+            IMyCameraBlock cameraSensor = null;
+
+            public ParkingService()
+            {
+                groupName = "[Parking Service]";
+                init();
+            }
+
+            void init()
+            {
+                findRequiredBlocks();
+                renameBlocks();
+                cameraSensor.EnableRaycast = true;
+                if (cameraSensor.CustomData != String.Empty)
+                {
+                    float.TryParse(cameraSensor.CustomData, out maxSensorDistance);
+                }
+            }
+
+            override public void update500()
+            {
+                //reinit
+                init();
+            }
+
+            override public void update10()
+            {
+                if (cameraSensor != null)
+                {
+                    MyDetectedEntityInfo lastDetectedEntityInfo = cameraSensor.Raycast(maxSensorDistance);
+                    //Log(lastDetectedEntityInfo.Type.ToString());
+                    if (lastDetectedEntityInfo.Type != MyDetectedEntityType.None && lightingBlock != null)
+                    {
+                        lightingBlock.Enabled = true;
+                    }
+                    else
+                    {
+                        lightingBlock.Enabled = false;
+                    }
+                    Vector3 sensorPosition = cameraSensor.WorldMatrix.Translation;
+                    float distance = float.PositiveInfinity;
+                    if (lastDetectedEntityInfo.HitPosition != null)
+                    {
+                        distance = Vector3.Distance(sensorPosition, lastDetectedEntityInfo.HitPosition.Value);
+                        changeLightColor(distance);
+                    }
+
+                    //Log("Distance: " + distance);
+                }
+            }
+
+            void findRequiredBlocks()
+            {
+                IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
+
+                List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
+                groupBlocks.GetBlocksOfType<IMyCameraBlock>(blocks);
+
+                blocks.ForEach(b => cameraSensor = b as IMyCameraBlock);
+
+                groupBlocks.GetBlocksOfType<IMyLightingBlock>(blocks);
+                blocks.ForEach(b => lightingBlock = b as IMyLightingBlock);
+            }
+
+            void changeLightColor(float distance)
+            {
+                Vector3 redColor = new Vector3(1f, 0f, 0f);
+                Vector3 greenColor = new Vector3(0f, 1f, 0f);
+                Vector3 color = Vector3.Lerp(redColor, greenColor, distance / maxSensorDistance);
+                if (lightingBlock != null)
+                {
+                    lightingBlock.Color = new Color(color);
+                }
+            }
+
+            void renameBlocks()
+            {
+                if (cameraSensor != null)
+                {
+                    cameraSensor.CustomName = groupName + " Camera Ground Sensor";
+                }
+
+                if (lightingBlock != null)
+                {
+                    lightingBlock.CustomName = groupName + " Light Distance Meter";
+                }
+            }
+        }
+        #endregion //Parking Service
+
+        #region DebugScreenService
         class DebugScreenService : BaseShipService
         {
             IMyTextPanel debugTextPanel;
-            IMyGridTerminalSystem GTS;
 
-            public DebugScreenService(IMyGridTerminalSystem GTS)
+            public DebugScreenService()
             {
                 groupName = "[DebugScreenService]";
-                this.GTS = GTS;
                 init();
                 debugTextPanel?.WritePublicText("", false);
             }
@@ -404,10 +555,10 @@ namespace IngameScript
                 }
             }
         }
-#endregion //DebugScreenService
-
-        IMyGridTerminalSystem GTS;
-
+        #endregion //DebugScreenService
+        //--------------------------------------
+        static IMyGridTerminalSystem GTS;
+        static IMyProgrammableBlock Self;
         List<IShipService> shipServices = new List<IShipService>();
 
         NetworkService networkService = null;
@@ -416,11 +567,15 @@ namespace IngameScript
         {
             Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
             GTS = GridTerminalSystem;
-            DebugScreenService debugService = new DebugScreenService(GTS);
+            Self = Me;
+            DebugScreenService debugService = new DebugScreenService();
             Log = (string text ) => { debugService.Log(text); };
-            networkService = new NetworkService(GTS, generateUniqueNetworkName());
+            networkService = new NetworkService(generateUniqueNetworkName());
             shipServices.Add(networkService);
             shipServices.Add(debugService);
+            shipServices.Add(new FuelService());
+            shipServices.Add(new ParkingService());
+            
             testListener = new TestListener(networkService);
         }
 
@@ -431,7 +586,7 @@ namespace IngameScript
         
         string generateUniqueNetworkName()
         {
-            return "ship [" + Me.WorldMatrix.Translation.ToString().GetHashCode() + "]";
+            return Math.Abs(Me.WorldMatrix.Translation.ToString().GetHashCode()).ToString();
         }
 
         int executionCounter = 0;
@@ -500,13 +655,13 @@ namespace IngameScript
 
 #region Libraries
 
-        VRage.MyFixedPoint getSumAmountItemsOfType<TBlockType>(string subtype, List<TBlockType> blocks) where TBlockType : class, IMyTerminalBlock
+        static VRage.MyFixedPoint getSumAmountItemsOfType<TBlockType>(string subtype, List<TBlockType> blocks) where TBlockType : class, IMyTerminalBlock
         {
             VRage.MyFixedPoint amount = 0;
             blocks.ForEach(block =>
             {
                 List<IMyInventoryItem> items = new List<IMyInventoryItem>();
-                items = block.GetInventory(0).GetItems();
+                items = block.GetInventory().GetItems();
 
                 for (int i = 0; i < items.Count; i++)
                 {
@@ -522,7 +677,7 @@ namespace IngameScript
             return amount;
         }
 
-        VRage.MyFixedPoint getAmountItemsOfType(string subtype, IMyTerminalBlock block)
+        static VRage.MyFixedPoint getAmountItemsOfType(string subtype, IMyTerminalBlock block)
         {
             VRage.MyFixedPoint amount = 0;
 
@@ -543,7 +698,7 @@ namespace IngameScript
             return amount;
         }
 
-        int getItemIndex(string subtype, IMyTerminalBlock block)
+        static int getItemIndex(string subtype, IMyTerminalBlock block)
         {
             List<IMyInventoryItem> items = new List<IMyInventoryItem>();
             items = block.GetInventory(0).GetItems();
@@ -564,7 +719,7 @@ namespace IngameScript
         }
 
 
-        void sortOreOfType<TBlockType>(string typename, List<TBlockType> containers) where TBlockType : class, IMyTerminalBlock
+        public static void sortOreOfType<TBlockType>(string typename, List<TBlockType> containers) where TBlockType : class, IMyTerminalBlock
         {
             int averageOreAmout = ((int)getSumAmountItemsOfType(typename, containers) / containers.Count);
             //Echo("" + averageOreAmout); 
@@ -615,11 +770,11 @@ namespace IngameScript
         }
 
 
-        void ApplyActionTo<TBlockType>(string action)
+        static void ApplyActionTo<TBlockType>(string action)
         where TBlockType : class, IMyTerminalBlock
         {
             List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<TBlockType>(blocks, b => b.CubeGrid == Me.CubeGrid);
+            GTS.GetBlocksOfType<TBlockType>(blocks, b => b.CubeGrid == Self.CubeGrid);
             blocks.ForEach(it =>
             {
                 TBlockType block = (TBlockType)it;
@@ -627,15 +782,15 @@ namespace IngameScript
             });
         }
 
-        void SetValueTo<TBlockType, T>(string propertyName, T value)
+        static void SetValueTo<TBlockType, T>(string propertyName, T value)
         where TBlockType : class, IMyTerminalBlock
         {
             List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<TBlockType>(blocks, b => b.CubeGrid == Me.CubeGrid);
+            GTS.GetBlocksOfType<TBlockType>(blocks, b => b.CubeGrid == Self.CubeGrid);
             blocks.ForEach(it =>
             {
                 TBlockType block = (TBlockType)it;
-                block.SetValue<T>(propertyName, value);
+                block.SetValue(propertyName, value);
             });
         }
 
@@ -645,7 +800,7 @@ namespace IngameScript
             List<IMyInventoryItem> inventoryItems = new List<IMyInventoryItem>();
 
             List<IMyTerminalBlock> cargosList = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<TBlockType>(cargosList, b => b.CubeGrid == Me.CubeGrid);
+            GTS.GetBlocksOfType<TBlockType>(cargosList, b => b.CubeGrid == Me.CubeGrid);
             cargosList.ForEach(it =>
             {
                 TBlockType cargo = (TBlockType)it;
@@ -673,18 +828,27 @@ namespace IngameScript
             });
         }
 
-        TBlockType GetBlockWithName<TBlockType>(string name)
+        static TBlockType GetBlockWithName<TBlockType>(string name)
         where TBlockType : class, IMyTerminalBlock
         {
             List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-            GridTerminalSystem.SearchBlocksOfName(name, blocks);
+            GTS.SearchBlocksOfName(name, blocks);
             foreach (var block in blocks)
             {
-                if (block.CubeGrid == Me.CubeGrid)
+                if (block.CubeGrid == Self.CubeGrid)
                     return (TBlockType)block;
             }
 
             return null;
+        }
+
+        static List<TBlockType> GetBlocksOfType<TBlockType>(string name, bool onlyThisGrid = true)
+        where TBlockType : class, IMyTerminalBlock
+        {
+            List<TBlockType> blocks = new List<TBlockType>();
+            GTS.GetBlocksOfType(blocks, b => onlyThisGrid ? b.CubeGrid == Self.CubeGrid  : true );
+
+            return blocks;
         }
 
         #endregion //Libraries
