@@ -33,9 +33,15 @@ namespace IngameScript
         // You can also simply create a new utility class manually, you don't
         // have to use the template if you don't want to. Just do so the first
         // time to see what a utility class looks like.
-#region ProgrammableBlock
-        static Action<string> Log;
-#region BaseService
+        #region ProgrammableBlock
+
+        static Action<string, bool> LogImpl;
+
+        static void Log(string text, bool append = true)
+        {
+            LogImpl(text, append);
+        }
+        #region BaseService
         public interface IShipService
         {
             void update(float dt);
@@ -300,10 +306,10 @@ namespace IngameScript
                 groupBlocks?.GetBlocksOfType<IMyRadioAntenna>(blocks);
 
                 blocks.ForEach(b => antenna = b as IMyRadioAntenna);
-                if(antenna==null)
-                {
-                    Log(groupName + ": Can't find antenna");
-                }
+                //if(antenna==null)
+                //{
+                //    Log(groupName + ": Can't find antenna");
+                //}
             }
 
             void renameBlocks()
@@ -392,24 +398,28 @@ namespace IngameScript
             void findRequiredBlocks()
             {
                 IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
-
-                List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-                groupBlocks.GetBlocksOfType(gasGenerators);
-                groupBlocks.GetBlocksOfType(reactors);
+                groupBlocks?.GetBlocksOfType(gasGenerators);
+                groupBlocks?.GetBlocksOfType(reactors);
             }
 
             void renameBlocks()
             {
-                for (int i = 0; i < gasGenerators.Count; i++)
+                if (gasGenerators != null)
                 {
-                    IMyGasGenerator gasGenerator = gasGenerators[i];
-                    gasGenerator.CustomName = groupName + " Gas Generator " + (i + 1);
+                    for (int i = 0; i < gasGenerators.Count; i++)
+                    {
+                        IMyGasGenerator gasGenerator = gasGenerators[i];
+                        gasGenerator.CustomName = groupName + " Gas Generator " + (i + 1);
+                    }
                 }
 
-                for (int i = 0; i < reactors.Count; i++)
+                if (reactors != null)
                 {
-                    IMyReactor reactor = reactors[i];
-                    reactor.CustomName = groupName + " Reactor " + (i + 1);
+                    for (int i = 0; i < reactors.Count; i++)
+                    {
+                        IMyReactor reactor = reactors[i];
+                        reactor.CustomName = groupName + " Reactor " + (i + 1);
+                    }
                 }
             }
         }
@@ -432,10 +442,13 @@ namespace IngameScript
             {
                 findRequiredBlocks();
                 renameBlocks();
-                cameraSensor.EnableRaycast = true;
-                if (cameraSensor.CustomData != String.Empty)
+                if (cameraSensor != null)
                 {
-                    float.TryParse(cameraSensor.CustomData, out maxSensorDistance);
+                    cameraSensor.EnableRaycast = true;
+                    if (cameraSensor.CustomData != String.Empty)
+                    {
+                        float.TryParse(cameraSensor.CustomData, out maxSensorDistance);
+                    }
                 }
             }
 
@@ -476,11 +489,11 @@ namespace IngameScript
                 IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
 
                 List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
-                groupBlocks.GetBlocksOfType<IMyCameraBlock>(blocks);
+                groupBlocks?.GetBlocksOfType<IMyCameraBlock>(blocks);
 
                 blocks.ForEach(b => cameraSensor = b as IMyCameraBlock);
 
-                groupBlocks.GetBlocksOfType<IMyLightingBlock>(blocks);
+                groupBlocks?.GetBlocksOfType<IMyLightingBlock>(blocks);
                 blocks.ForEach(b => lightingBlock = b as IMyLightingBlock);
             }
 
@@ -522,9 +535,9 @@ namespace IngameScript
                 debugTextPanel?.WritePublicText("", false);
             }
 
-            public void Log(string text)
+            public void Log(string text, bool append)
             {
-                debugTextPanel?.WritePublicText(text + "\n", true);
+                debugTextPanel?.WritePublicText(text + "\n", append);
             }
 
             void init()
@@ -556,7 +569,168 @@ namespace IngameScript
             }
         }
         #endregion //DebugScreenService
+
+        #region PilotingService
+        public class PilotingService : BaseShipService
+        {
+            float raycastDistance = 2000f;
+            IMyCameraBlock camera = null;
+            List<IMyGyro> gyroscopes;
+            Vector3D destination = new Vector3D();
+
+            public PilotingService()
+            {
+                groupName = "[Piloting Service]";
+                init();
+            }
+
+            public void SetDestination(Vector3D destination)
+            {
+                this.destination = destination;
+            }
+
+            void init()
+            {
+                findRequiredBlocks();
+                renameBlocks();
+                if (camera != null)
+                {
+                    camera.EnableRaycast = true;
+                    if (camera.CustomData != String.Empty)
+                    {
+                        float.TryParse(camera.CustomData, out raycastDistance);
+                    }
+
+                    if (gyroscopes != null && gyroscopes.Count > 0)
+                    {
+                        var gyro = gyroscopes[0];
+                        //gyro.GyroOverride = true;
+                    }
+                }
+            }
+
+            override public void update500()
+            {
+                //reinit
+                init();
+            }
+
+            override public void update(float dt)
+            {
+                rotateTowardDestination();
+            }
+
+            void rotateTowardDestination()
+            {
+                if (gyroscopes.Count > 0 && camera!=null)
+                {
+                    Vector3D forward = getForwardVector();
+                    Vector3D up = getUpVector();
+                    Vector3D right = getRightVector();
+
+                    Vector3D directionTowardDestination = destination - getPosition();
+
+                    directionTowardDestination.Normalize();
+
+                    Vector3D upForwardProjection = Vector3D.ProjectOnPlane(ref directionTowardDestination, ref right);
+                    Vector3D rightForwardProjection = Vector3D.ProjectOnPlane(ref directionTowardDestination, ref up);
+
+                    forward.Normalize();
+                    upForwardProjection.Normalize();
+                    rightForwardProjection.Normalize();
+
+                    double elevation = getAngleBetweenVectors(forward, upForwardProjection, Vector3D.Up);
+                    double azimuth = getAngleBetweenVectors(forward, rightForwardProjection, Vector3D.Right);
+
+                    Log("Elevation : " + (int)radiansToDegrees(elevation), false);
+                    Log("Azimuth : " + (int)radiansToDegrees(azimuth));
+                    
+
+                }
+            }
+
+            private Vector3D getRightVector()
+            {
+                return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Right);
+            }
+
+            private Vector3D getUpVector()
+            {
+                return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Up);
+            }
+
+            private Vector3D getForwardVector()
+            {
+                return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Forward);
+            }
+
+            Vector3D getForwardDirection()
+            {
+                return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Forward);
+            }
+
+            Vector3D getPosition()
+            {
+                return camera.WorldMatrix.Translation;
+            }
+
+            void findRequiredBlocks()
+            {
+                IMyBlockGroup groupBlocks = GTS.GetBlockGroupWithName(groupName);
+
+                List<IMyCameraBlock> cameraBlocks = new List<IMyCameraBlock>();
+                groupBlocks?.GetBlocksOfType(cameraBlocks);
+
+                cameraBlocks.ForEach(b => camera = b);
+
+                gyroscopes = GetBlocksOfTypeInGroup<IMyGyro>(groupName);
+
+            }
+
+            void renameBlocks()
+            {
+                if (camera != null)
+                {
+                    camera.CustomName = groupName + " Forward Camera";
+                }
+
+                if(gyroscopes!=null)
+                {
+                    for(int i = 0; i < gyroscopes.Count; i++)
+                    {
+                        IMyGyro gyro = gyroscopes[i];
+                        gyro.CustomName = groupName + " Gyro " + (i + 1);
+                    }
+                }
+            }
+
+            double getAngleBetweenVectors(Vector3D Va, Vector3D Vb, Vector3D Vn)
+            {
+                double angle = Math.Acos(Vector3D.Dot(Va, Vb));
+                var cross = Vector3D.Cross(Va, Vb);
+                if (Vector3D.Dot(Vn, cross) < 0)
+                { // Or > 0
+                    angle = -angle;
+                }
+                return angle;
+            }
+
+            double radiansToDegrees(double radians)
+            {
+                return radians * 180.0 / Math.PI;
+            }
+
+            Vector3D getAnglesBetweenDestinationAndForward()
+            {
+                return new Vector3D();
+            }
+        }
+        #endregion //Piloting Service
         //--------------------------------------
+
+
+        /// ////////////////////////////////////////////////////PROGRAMM////////////////////////////////////////////////////////////////////
+
         static IMyGridTerminalSystem GTS;
         static IMyProgrammableBlock Self;
         List<IShipService> shipServices = new List<IShipService>();
@@ -565,18 +739,29 @@ namespace IngameScript
 
         public Program()
         {
-            Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
-            GTS = GridTerminalSystem;
-            Self = Me;
-            DebugScreenService debugService = new DebugScreenService();
-            Log = (string text ) => { debugService.Log(text); };
-            networkService = new NetworkService(generateUniqueNetworkName());
-            shipServices.Add(networkService);
-            shipServices.Add(debugService);
-            shipServices.Add(new FuelService());
-            shipServices.Add(new ParkingService());
-            
-            testListener = new TestListener(networkService);
+            try
+            {
+                GTS = GridTerminalSystem;
+                Self = Me;
+                DebugScreenService debugService = new DebugScreenService();
+                LogImpl = (string text, bool append) => { debugService.Log(text, append); };
+                networkService = new NetworkService(generateUniqueNetworkName());
+                shipServices.Add(networkService);
+                shipServices.Add(debugService);
+                shipServices.Add(new FuelService());
+                shipServices.Add(new ParkingService());
+                var pilotingService = new PilotingService();
+                pilotingService.SetDestination(new Vector3D(0, 5000, 5000));
+                shipServices.Add(pilotingService);
+
+                testListener = new TestListener(networkService);
+
+                Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
+            }
+            catch (Exception e)
+            {
+                Echo(e.StackTrace);
+            }
         }
 
         public void Save()
@@ -650,9 +835,12 @@ namespace IngameScript
             catch(Exception e)
             {
                 Log(e.StackTrace);
+                Echo(e.StackTrace);
             }
         }
 
+        /// ////////////////////////////////////////////////////PROGRAMM END////////////////////////////////////////////////////////////////////
+        
 #region Libraries
 
         static VRage.MyFixedPoint getSumAmountItemsOfType<TBlockType>(string subtype, List<TBlockType> blocks) where TBlockType : class, IMyTerminalBlock
@@ -848,6 +1036,15 @@ namespace IngameScript
             List<TBlockType> blocks = new List<TBlockType>();
             GTS.GetBlocksOfType(blocks, b => onlyThisGrid ? b.CubeGrid == Self.CubeGrid  : true );
 
+            return blocks;
+        }
+
+        static List<TBlockType>  GetBlocksOfTypeInGroup<TBlockType>(string groupName)
+        where TBlockType : class, IMyTerminalBlock
+        {
+            List<TBlockType> blocks = new List<TBlockType>();
+            var group = GTS.GetBlockGroupWithName(groupName);
+            group?.GetBlocksOfType(blocks);
             return blocks;
         }
 
