@@ -627,7 +627,8 @@ namespace IngameScript
                     Vector3D forward = getForwardVector();
                     Vector3D up = getUpVector();
                     Vector3D right = getRightVector();
-
+                    right.Normalize();
+                    up.Normalize();
                     Vector3D directionTowardDestination = destination - getPosition();
 
                     directionTowardDestination.Normalize();
@@ -642,9 +643,17 @@ namespace IngameScript
                     double elevation = getAngleBetweenVectors(forward, upForwardProjection, Vector3D.Up);
                     double azimuth = getAngleBetweenVectors(forward, rightForwardProjection, Vector3D.Right);
 
+                    float force = 0.1f;
+
+                    gyroscopes[0].Yaw = (float) azimuth * 2f * force;
+                    gyroscopes[0].Pitch = (float) elevation * 2f * force;
+
                     Log("Elevation : " + (int)radiansToDegrees(elevation), false);
                     Log("Azimuth : " + (int)radiansToDegrees(azimuth));
-                    
+
+                    Log("Yaw" + gyroscopes[0].Yaw);
+                    Log("Pitch" + gyroscopes[0].Pitch);
+
 
                 }
             }
