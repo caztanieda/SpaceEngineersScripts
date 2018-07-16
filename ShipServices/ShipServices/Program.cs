@@ -640,13 +640,13 @@ namespace IngameScript
                     upForwardProjection.Normalize();
                     rightForwardProjection.Normalize();
 
-                    double elevation = getAngleBetweenVectors(forward, upForwardProjection, Vector3D.Up);
-                    double azimuth = getAngleBetweenVectors(forward, rightForwardProjection, Vector3D.Right);
+                    double elevation = getAngleBetweenVectors(forward, upForwardProjection) * getPitchSign(upForwardProjection, forward, right);
+                    double azimuth = getAngleBetweenVectors(forward, rightForwardProjection) * getYawSign(rightForwardProjection, forward, up);
 
-                    float force = 0.1f;
-
-                    gyroscopes[0].Yaw = (float) azimuth * 2f * force;
-                    gyroscopes[0].Pitch = (float) elevation * 2f * force;
+                    float maxRPM = 2f;
+                    
+                    gyroscopes[0].Yaw = (float) Math.Sign(azimuth) * (float)Math.Min(maxRPM, Math.Abs(azimuth * 2f));
+                    gyroscopes[0].Pitch = (float) Math.Sign(elevation) * (float)Math.Min(maxRPM, Math.Abs(elevation * 2f));
 
                     Log("Elevation : " + (int)radiansToDegrees(elevation), false);
                     Log("Azimuth : " + (int)radiansToDegrees(azimuth));
@@ -713,15 +713,20 @@ namespace IngameScript
                 }
             }
 
-            double getAngleBetweenVectors(Vector3D Va, Vector3D Vb, Vector3D Vn)
+            double getAngleBetweenVectors(Vector3D Va, Vector3D Vb)
             {
                 double angle = Math.Acos(Vector3D.Dot(Va, Vb));
-                var cross = Vector3D.Cross(Va, Vb);
-                if (Vector3D.Dot(Vn, cross) < 0)
-                { // Or > 0
-                    angle = -angle;
-                }
                 return angle;
+            }
+
+            int getYawSign(Vector3D rightForwardProjection, Vector3D forward, Vector3D up)
+            {
+                return Math.Sign(Vector3D.Dot(up, Vector3D.Cross(rightForwardProjection, forward)));
+            }
+
+            int getPitchSign(Vector3D upForwardProjection, Vector3D forward, Vector3D right)
+            {
+                return Math.Sign(Vector3D.Dot(right, Vector3D.Cross(upForwardProjection, forward)));
             }
 
             double radiansToDegrees(double radians)
