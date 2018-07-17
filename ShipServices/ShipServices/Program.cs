@@ -674,6 +674,8 @@ namespace IngameScript
                 angles.Yaw = azimuthIntent;
                 angles.Roll = 0;
 
+                angles = convertAnglesByOrientation(camera.Orientation, angles);
+
 
                 foreach (IMyGyro gyro in gyroscopes)
                 {
@@ -778,11 +780,6 @@ namespace IngameScript
             }
 
             private Vector3D getForwardVector()
-            {
-                return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Forward);
-            }
-
-            Vector3D getForwardDirection()
             {
                 return camera.WorldMatrix.GetDirectionVector(Base6Directions.Direction.Forward);
             }
