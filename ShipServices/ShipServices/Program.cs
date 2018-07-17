@@ -644,18 +644,127 @@ namespace IngameScript
                     double azimuth = getAngleBetweenVectors(forward, rightForwardProjection) * getYawSign(rightForwardProjection, forward, up);
 
                     float maxRPM = 2f;
-                    
-                    gyroscopes[0].Yaw = (float) Math.Sign(azimuth) * (float)Math.Min(maxRPM, Math.Abs(azimuth * 2f));
-                    gyroscopes[0].Pitch = (float) Math.Sign(elevation) * (float)Math.Min(maxRPM, Math.Abs(elevation * 2f));
+
+                    float azimuthIntent = Math.Sign(azimuth) * (float)Math.Min(maxRPM, Math.Abs(azimuth * 2f));
+                    float elevationIntent = Math.Sign(elevation) * (float)Math.Min(maxRPM, Math.Abs(elevation * 2f));
+
 
                     Log("Elevation : " + (int)radiansToDegrees(elevation), false);
                     Log("Azimuth : " + (int)radiansToDegrees(azimuth));
 
-                    Log("Yaw" + gyroscopes[0].Yaw);
-                    Log("Pitch" + gyroscopes[0].Pitch);
+                    Log("Yaw " + gyroscopes[0].Yaw);
+                    Log("Pitch " + gyroscopes[0].Pitch);
+                    Log("Roll " + gyroscopes[0].Roll);
 
-
+                    setShipAzimuthAndElevationIntents(azimuthIntent, elevationIntent);
                 }
+            }
+
+            struct Angles
+            {
+                public float Yaw;
+                public float Pitch;
+                public float Roll;
+            }
+
+            private void setShipAzimuthAndElevationIntents(float azimuthIntent, float elevationIntent)
+            {
+                Angles angles = new Angles();
+                angles.Pitch = elevationIntent;
+                angles.Yaw = azimuthIntent;
+                angles.Roll = 0;
+
+
+                foreach (IMyGyro gyro in gyroscopes)
+                {
+                    Angles convertedAngles = convertAnglesByOrientation(gyro.Orientation, angles);
+                    gyro.Yaw = convertedAngles.Yaw;
+                    gyro.Pitch = convertedAngles.Pitch;
+                    gyro.Roll = convertedAngles.Roll;
+                }
+            }
+
+            private Angles convertAnglesByOrientation(MyBlockOrientation orientation, Angles angles)
+            {
+                Angles converted = new Angles();
+
+                if (orientation.Forward == Base6Directions.Direction.Forward)
+                {
+                    converted.Roll = angles.Roll;
+                }
+                else if(orientation.Forward == Base6Directions.Direction.Backward)
+                {
+                    converted.Roll = -angles.Roll;
+                }
+                else if(orientation.Forward == Base6Directions.Direction.Left)
+                {
+                    converted.Roll = angles.Pitch;
+                }
+                else if (orientation.Forward == Base6Directions.Direction.Right)
+                {
+                    converted.Roll = -angles.Pitch;
+                }
+                else if (orientation.Forward == Base6Directions.Direction.Up)
+                {
+                    converted.Roll = -angles.Yaw;
+                }
+                else if (orientation.Forward == Base6Directions.Direction.Down)
+                {
+                    converted.Roll = angles.Yaw;
+                }
+                //--------------------------------------------------------------------
+                if (orientation.Left == Base6Directions.Direction.Forward)
+                {
+                    converted.Pitch = angles.Roll;
+                }
+                else if (orientation.Left == Base6Directions.Direction.Backward)
+                {
+                    converted.Pitch = -angles.Roll;
+                }
+                else if (orientation.Left == Base6Directions.Direction.Left)
+                {
+                    converted.Pitch = angles.Pitch;
+                }
+                else if (orientation.Left == Base6Directions.Direction.Right)
+                {
+                    converted.Pitch = -angles.Pitch;
+                }
+                else if (orientation.Left == Base6Directions.Direction.Up)
+                {
+                    converted.Pitch = -angles.Yaw;
+                }
+                else if (orientation.Left == Base6Directions.Direction.Down)
+                {
+                    converted.Pitch = angles.Yaw;
+                }
+                //--------------------------------------------------------------------
+                if (orientation.Up == Base6Directions.Direction.Forward)
+                {
+                    converted.Yaw = angles.Roll;
+                }
+                else if (orientation.Up == Base6Directions.Direction.Backward)
+                {
+                    converted.Yaw = -angles.Roll;
+                }
+                else if (orientation.Up == Base6Directions.Direction.Left)
+                {
+                    converted.Yaw = -angles.Pitch;
+                }
+                else if (orientation.Up == Base6Directions.Direction.Right)
+                {
+                    converted.Yaw = angles.Pitch;
+                }
+                else if (orientation.Up == Base6Directions.Direction.Up)
+                {
+                    converted.Yaw = angles.Yaw;
+                }
+                else if (orientation.Up == Base6Directions.Direction.Down)
+                {
+                    converted.Yaw = -angles.Yaw;
+                }
+
+
+                return converted;
             }
 
             private Vector3D getRightVector()
@@ -732,11 +841,6 @@ namespace IngameScript
             double radiansToDegrees(double radians)
             {
                 return radians * 180.0 / Math.PI;
-            }
-
-            Vector3D getAnglesBetweenDestinationAndForward()
-            {
-                return new Vector3D();
             }
         }
         #endregion //Piloting Service
