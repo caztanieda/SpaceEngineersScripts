@@ -386,12 +386,12 @@ namespace IngameScript
                 init();
                 if (gasGenerators != null && gasGenerators.Count > 1)
                 {
-                    sortOreOfType("Ice", gasGenerators);
+                    sortOreOfType(InvetoryItems.Ores.Ice, gasGenerators);
                 }
 
                 if (reactors != null && reactors.Count > 1)
                 {
-                    sortOreOfType("Uranium", reactors);
+                    sortOreOfType(InvetoryItems.Ingots.UraniumIngot, reactors);
                 }
             }
 
@@ -649,12 +649,12 @@ namespace IngameScript
                     float elevationIntent = Math.Sign(elevation) * (float)Math.Min(maxRPM, Math.Abs(elevation * 2f));
 
 
-                    Log("Elevation : " + (int)radiansToDegrees(elevation), false);
-                    Log("Azimuth : " + (int)radiansToDegrees(azimuth));
+                    //Log("Elevation : " + (int)radiansToDegrees(elevation), false);
+                    //Log("Azimuth : " + (int)radiansToDegrees(azimuth));
 
-                    Log("Yaw " + gyroscopes[0].Yaw);
-                    Log("Pitch " + gyroscopes[0].Pitch);
-                    Log("Roll " + gyroscopes[0].Roll);
+                    //Log("Yaw " + gyroscopes[0].Yaw);
+                    //Log("Pitch " + gyroscopes[0].Pitch);
+                    //Log("Roll " + gyroscopes[0].Roll);
 
                     setShipAzimuthAndElevationIntents(azimuthIntent, elevationIntent);
                 }
@@ -969,8 +969,9 @@ namespace IngameScript
                 for (int i = 0; i < items.Count; i++)
                 {
                     var item = items[i];
-                    string typeName = item.Content.SubtypeName;
-                    if (typeName == subtype)
+                    string typeName = item.GetDefinitionId().ToString();
+                    //Log("Typename" + typeName);
+                    if (typeName.Contains(subtype))
                     {
                         amount += item.Amount;
                     }
@@ -990,7 +991,7 @@ namespace IngameScript
             for (int i = 0; i < items.Count; i++)
             {
                 var item = items[i];
-                string typeName = item.Content.SubtypeName;
+                string typeName = item.GetDefinitionId().ToString();
                 if (typeName == subtype)
                 {
                     amount += item.Amount;
@@ -1010,7 +1011,7 @@ namespace IngameScript
             for (int i = 0; i < items.Count; i++)
             {
                 var item = items[i];
-                string typeName = item.Content.SubtypeName;
+                string typeName = item.GetDefinitionId().ToString();
                 if (typeName == subtype)
                 {
                     return i;
@@ -1020,6 +1021,19 @@ namespace IngameScript
 
             return 0;
         }
+
+        public class InvetoryItems
+        {
+            public class Ingots
+            {
+                static public string UraniumIngot = "MyObjectBuilder_Ingot/Uranium";
+            }
+
+            public class Ores
+            {
+                static public string Ice = "MyObjectBuilder_Ore/Ice";
+            }
+        };
 
 
         public static void sortOreOfType<TBlockType>(string typename, List<TBlockType> containers) where TBlockType : class, IMyTerminalBlock
@@ -1117,7 +1131,7 @@ namespace IngameScript
                     {
                         var item = items[j];
                         float amount = (float)item.Amount;
-                        string typeName = item.Content.SubtypeName;
+                        string typeName = item.Content.ToString();
                         if (cargoItems.ContainsKey(typeName))
                         {
                             cargoItems[typeName] += amount;
@@ -1145,7 +1159,7 @@ namespace IngameScript
             return null;
         }
 
-        static List<TBlockType> GetBlocksOfType<TBlockType>(string name, bool onlyThisGrid = true)
+        static List<TBlockType> GetBlocksOfType<TBlockType>(bool onlyThisGrid = true)
         where TBlockType : class, IMyTerminalBlock
         {
             List<TBlockType> blocks = new List<TBlockType>();
