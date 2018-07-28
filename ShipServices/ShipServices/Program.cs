@@ -16,7 +16,7 @@ using VRageMath;
 
 namespace IngameScript
 {
-    partial class ProgramForRocket : MyGridProgram
+    partial class Program : MyGridProgram
     {
         // This file contains your actual script.
         //
@@ -523,6 +523,214 @@ namespace IngameScript
         }
         #endregion //Parking Service
 
+        #region InfoService
+        public class InfoService : BaseShipService
+        {
+            Dictionary<string, float> inventoryItems;
+            List<IMyTextPanel> panelsToShowInventory;
+
+            Dictionary<IMyTextPanel, List<ProgressBar>> progressBars = new Dictionary<IMyTextPanel, List<ProgressBar>>();
+
+            Dictionary<IMyTextPanel, string[]> drawBuffers = new Dictionary<IMyTextPanel, string[]>();
+
+            public InfoService()
+            {
+                groupName = "[Info Service]";
+                inventoryItems = new Dictionary<string, float>();
+                panelsToShowInventory = new List<IMyTextPanel>();
+
+                init();
+            }
+
+            private void createDrawBuffer(IMyTextPanel textPanel)
+            {
+                if (!drawBuffers.ContainsKey(textPanel))
+                {
+                    var drawBuffer = new string[43];
+                    for (int i = 0; i < drawBuffer.Length; i++)
+                    {
+                        drawBuffer[i] = new string(SColor.getColor(0, 0, 0), 90);
+                    }
+
+                    drawBuffers.Add(textPanel, drawBuffer);
+                }
+            }
+
+            void init()
+            {
+                findRequiredBlocks();
+            }
+
+            override public void update500()
+            {
+                //reinit
+                init();
+            }
+
+            override public void update100()
+            {
+                updateCargoInfo();
+                updateShipInfo();
+            }
+
+            static float tempVal = 1.0f;
+
+            private void updateShipInfo()
+            {
+                tempVal += 0.01f;
+
+                if (tempVal >= 1f)
+                {
+                    tempVal = 0f;
+                }
+
+                foreach (var textPanel in progressBars.Keys)
+                {
+                    foreach(var pb in progressBars[textPanel])
+                    {
+                        pb.setPercent(tempVal);
+                    }
+
+                    textPanel.WritePublicText(String.Empty);
+                    foreach (var line in drawBuffers[textPanel])
+                    {
+                        textPanel.WritePublicText(line + "\n", true);
+                    }
+                }
+            }
+
+            private void updateCargoInfo()
+            {
+                inventoryItems.Clear();
+                getInventoryItems<IMyCargoContainer>(inventoryItems);
+                getInventoryItems<IMyShipDrill>(inventoryItems);
+                getInventoryItems<IMyShipGrinder>(inventoryItems);
+                getInventoryItems<IMyShipController>(inventoryItems);
+                getInventoryItems<IMyShipConnector>(inventoryItems);
+
+                foreach (var textPanel in panelsToShowInventory)
+                {
+                    if(textPanel.CustomData.Contains("All"))
+                    {
+                        bool append = false;
+                        foreach(var kv in inventoryItems)
+                        {
+                            textPanel.WritePublicText(getShortItemName(kv.Key) + ":" + (int)kv.Value + "\n", append);
+                            append = true;
+                        }
+                    }
+
+                    if (textPanel.CustomData.Contains("Ores"))
+                    {
+                        bool append = false;
+                        foreach (var kv in inventoryItems)
+                        {
+                            if (isOre(kv.Key))
+                            {
+                                textPanel.WritePublicText(getShortItemName(kv.Key) + ":" + (int)kv.Value + "\n", append);
+                                append = true;
+                            }
+                        }
+                    }
+
+                    if (textPanel.CustomData.Contains("Ingots"))
+                    {
+                        bool append = false;
+                        foreach (var kv in inventoryItems)
+                        {
+                            if (isIngot(kv.Key))
+                            {
+                                textPanel.WritePublicText(getShortItemName(kv.Key) + ":" + (int)kv.Value + "\n", append);
+                                append = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            private bool isIngot(string itemName)
+            {
+                return itemName.Contains("Ingot");
+            }
+
+            private bool isOre(string itemName)
+            {
+                return itemName.Contains("Ore");
+            }
+
+            void findRequiredBlocks()
+            {
+                panelsToShowInventory.Clear();
+                progressBars.Clear();
+                var allTextPanels = GetBlocksOfType<IMyTextPanel>();
+                foreach(var textPanel in allTextPanels)
+                {
+                    if (textPanel.CustomData.Contains("Ores") ||
+                       textPanel.CustomData.Contains("Ingots") ||
+                       textPanel.CustomData.Contains("All"))
+                    {
+                        panelsToShowInventory.Add(textPanel);
+                    }
+                    else
+                    {
+                        var list = new List<ProgressBar>();
+                        createDrawBuffer(textPanel);
+                        if (textPanel.CustomData.Contains("Energy"))
+                        {
+                            string[] drawBuffer = drawBuffers[textPanel];
+                            var energyProgressBar = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Energy, 59);
+                            energyProgressBar.setDrawColor(0, 7, 0);
+                            energyProgressBar.setPBColor(new SColor(7, 0, 0), new SColor(0, 7, 0));
+                            list.Add(energyProgressBar);
+                        }
+
+                        if (textPanel.CustomData.Contains("Fuel"))
+                        {
+                            string[] drawBuffer = drawBuffers[textPanel];
+                            var fuelProgressBar = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Fuel, 59);
+                            fuelProgressBar.setDrawColor(0, 5, 5);
+                            fuelProgressBar.setPBColor(new SColor(7, 0, 0), new SColor(0, 5, 5));
+                            list.Add(fuelProgressBar);
+                        }
+
+                        if (textPanel.CustomData.Contains("Hydrogen"))
+                        {
+                            string[] drawBuffer = drawBuffers[textPanel];
+                            var hydrogenPB = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Hydrogen, 59);
+                            hydrogenPB.setDrawColor(0, 1, 5);
+                            hydrogenPB.setPBColor(new SColor(7, 0, 0), new SColor(0, 1, 5));
+                            list.Add(hydrogenPB);
+                        }
+
+                        if (textPanel.CustomData.Contains("Cargo"))
+                        {
+                            string[] drawBuffer = drawBuffers[textPanel];
+                            var cargoPB = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Cargo, 59);
+                            cargoPB.setDrawColor(7, 7, 0);
+                            cargoPB.setPBColor(new SColor(7, 7, 0), new SColor(7, 0, 0));
+                            list.Add(cargoPB);
+                        }
+
+                        if (progressBars.ContainsKey(textPanel))
+                        {
+                            progressBars[textPanel] = list;
+                        }
+                        else
+                        {
+                            progressBars.Add(textPanel, list);
+                        }
+                    }
+
+                }
+            }
+
+            void renameBlocks()
+            {
+
+            }
+        }
+        #endregion //Parking Service
+
         #region DebugScreenService
         class DebugScreenService : BaseShipService
         {
@@ -860,16 +1068,17 @@ namespace IngameScript
                 Self = Me;
                 DebugScreenService debugService = new DebugScreenService();
                 LogImpl = (string text, bool append) => { debugService.Log(text, append); };
-                networkService = new NetworkService(generateUniqueNetworkName());
-                shipServices.Add(networkService);
+                //networkService = new NetworkService(generateUniqueNetworkName());
+                //shipServices.Add(networkService);
                 shipServices.Add(debugService);
                 shipServices.Add(new FuelService());
                 shipServices.Add(new ParkingService());
-                var pilotingService = new PilotingService();
-                pilotingService.SetDestination(new Vector3D(0, 5000, 5000));
-                shipServices.Add(pilotingService);
+                //var pilotingService = new PilotingService();
+                //pilotingService.SetDestination(new Vector3D(0, 5000, 5000));
+                //shipServices.Add(pilotingService);
 
-                testListener = new TestListener(networkService);
+                //testListener = new TestListener(networkService);
+                shipServices.Add(new InfoService());
 
                 Runtime.UpdateFrequency = UpdateFrequency.Update1 | UpdateFrequency.Update10 | UpdateFrequency.Update100;
             }
@@ -986,7 +1195,7 @@ namespace IngameScript
             VRage.MyFixedPoint amount = 0;
 
             List<IMyInventoryItem> items = new List<IMyInventoryItem>();
-            items = block.GetInventory(0).GetItems();
+            items = block.GetInventory().GetItems();
 
             for (int i = 0; i < items.Count; i++)
             {
@@ -1032,6 +1241,15 @@ namespace IngameScript
             public class Ores
             {
                 static public string Ice = "MyObjectBuilder_Ore/Ice";
+                public static string Iron = "MyObjectBuilder_Ore/Iron";
+                internal static string Nickel = "MyObjectBuilder_Ore/Nickel";
+                internal static string Cobalt = "MyObjectBuilder_Ore/Cobalt";
+                internal static string Magnesium = "MyObjectBuilder_Ore/Magnesium";
+                internal static string Silicon = "MyObjectBuilder_Ore/Silicon";
+                internal static string Silver = "MyObjectBuilder_Ore/Silver";
+                internal static string Gold = "MyObjectBuilder_Ore/Gold";
+                internal static string Platinum = "MyObjectBuilder_Ore/Platinum";
+                internal static string Uranium = "MyObjectBuilder_Ore/Uranium";
             }
         };
 
@@ -1068,21 +1286,28 @@ namespace IngameScript
         {
             Dictionary<string, string> ores = new Dictionary<string, string>()
             {
-                {"Iron", "Fe"},
-                {"Nickel", "Ni"},
-                {"Cobalt", "Co"},
-                {"Magnesium", "Mg"},
-                {"Silicon", "Si"},
-                {"Silver", "Ag"},
-                {"Gold", "Au"},
-                {"Platinum", "Pt"},
-                {"Uranium", "Ur"}
+                {InvetoryItems.Ores.Iron, "Fe"},
+                {InvetoryItems.Ores.Nickel, "Ni"},
+                {InvetoryItems.Ores.Cobalt, "Co"},
+                {InvetoryItems.Ores.Magnesium, "Mg"},
+                {InvetoryItems.Ores.Silicon, "Si"},
+                {InvetoryItems.Ores.Silver, "Ag"},
+                {InvetoryItems.Ores.Gold, "Au"},
+                {InvetoryItems.Ores.Platinum, "Pt"},
+                {InvetoryItems.Ores.Uranium, "Ur"}
             };
 
-            string ret = name;
+            string ret = getShortItemName(name);
             if (ores.ContainsKey(name))
                 ret = ores[name];
 
+            return ret;
+        }
+
+        static string getShortItemName(string name)
+        {
+            string[] splitted = name.Split('/');
+            string ret = splitted.Length > 1 ? splitted[1] : name;
             return ret;
         }
 
@@ -1111,27 +1336,27 @@ namespace IngameScript
             });
         }
 
-        void getInventoryItems<TBlockType>(Dictionary<string, float> cargoItems)
+        static void getInventoryItems<TBlockType>(Dictionary<string, float> cargoItems)
         where TBlockType : class, IMyTerminalBlock
         {
             List<IMyInventoryItem> inventoryItems = new List<IMyInventoryItem>();
 
             List<IMyTerminalBlock> cargosList = new List<IMyTerminalBlock>();
-            GTS.GetBlocksOfType<TBlockType>(cargosList, b => b.CubeGrid == Me.CubeGrid);
+            GTS.GetBlocksOfType<TBlockType>(cargosList, b => b.CubeGrid == Self.CubeGrid);
             cargosList.ForEach(it =>
             {
-                TBlockType cargo = (TBlockType)it;
+                TBlockType cargo = it as TBlockType;
 
                 List<IMyInventoryItem> items = new List<IMyInventoryItem>();
                 if (cargo.InventoryCount > 0)
                 {
-                    items = cargo.GetInventory(0).GetItems();
+                    items = cargo.GetInventory().GetItems();
 
                     for (int j = 0; j < items.Count; ++j)
                     {
                         var item = items[j];
                         float amount = (float)item.Amount;
-                        string typeName = item.Content.ToString();
+                        string typeName = item.GetDefinitionId().ToString();
                         if (cargoItems.ContainsKey(typeName))
                         {
                             cargoItems[typeName] += amount;
@@ -1176,6 +1401,219 @@ namespace IngameScript
             group?.GetBlocksOfType(blocks);
             return blocks;
         }
+
+        public class Icons
+        {
+            static public string[] Energy = {
+                            "█████████",
+                            "██     ██",
+                            "█       █",
+                            "█ █████ █",
+                            "█ ███ █ █",
+                            "█ █   █ █",
+                            "█ █ ███ █",
+                            "█ █████ █",
+                            "█       █",
+                            "█████████"};
+
+            static public string[] Hydrogen = {
+                            "█████████",
+                            "███   ███",
+                            "█   █   █",
+                            "█ █████ █",
+                            "█ █ █ █ █",
+                            "█ █   █ █",
+                            "█ █ █ █ █",
+                            "█ █████ █",
+                            "█       █",
+                            "█████████"};
+
+            static public string[] Fuel = {
+                            "█████████",
+                            "█     ███",
+                            "█ ███   █",
+                            "█ █████ █",
+                            "█ █ █ █ █",
+                            "█ ██ ██ █",
+                            "█ █ █ █ █",
+                            "█ █████ █",
+                            "█       █",
+                            "█████████"};
+
+            static public string[] Cargo = {
+                            "█████████",
+                            "█       █",
+                            "█ █████ █",
+                            "█  ███  █",
+                            "█ █████ █",
+                            "█ █████ █",
+                            "█ █████ █",
+                            "█ █████ █",
+                            "█       █",
+                            "█████████"};
+
+        }
+
+        public struct SColor
+        {
+            public byte r;
+            public byte g;
+            public byte b;
+
+            public SColor(byte r, byte g, byte b)
+            {
+                this.r = r;
+                this.g = g;
+                this.b = b;
+            }
+
+            public static char getColor(byte r, byte g, byte b)
+            {
+                return (char)(0xe100 + (r << 6) + (g << 3) + b);
+            }
+
+            public char getColor()
+            {
+                return getColor(r, g, b);
+            }
+        }
+
+        public class ProgressBar
+        {
+
+            int y = 0;
+            int x = 0;
+            char symbolToDraw;
+            char backgroundSymbol;
+            char colorToDrawPB;
+            int pbSizeWithEdge;
+            int pbSize;
+            int height = 10;
+            string[] icon;
+            string[] drawBuffer;
+            float percent = 1f;
+            string pattern;
+            string drawPattern;
+            SColor colorFrom;
+            SColor colorTo;
+            bool dynamicPBColor = false;
+
+            public ProgressBar(int x, int y, ref string[] drawBuffer, string[] icon, int size, string pattern = "*** ")
+            {
+                this.x = x + icon[0].Length;
+                this.y = y;
+                pbSizeWithEdge = size;
+                pbSize = pbSizeWithEdge - 3;
+                this.pattern = pattern;
+                this.drawBuffer = drawBuffer;
+                this.icon = icon;
+                backgroundSymbol = SColor.getColor(0, 0, 0);
+                setDrawColor(7, 7, 7);
+            }
+
+            public void setPercent(float percent)
+            {
+                this.percent = percent;
+                draw();
+            }
+
+            void draw()
+            {
+                drawIcon();
+                replacePBColor();
+                StringBuilder upBottomline = new StringBuilder();
+                StringBuilder gapLine = new StringBuilder();
+                StringBuilder middleLine = new StringBuilder();
+
+                upBottomline.Append(symbolToDraw, pbSizeWithEdge);
+                gapLine.Append(backgroundSymbol, pbSize + 2);
+                gapLine.Append(symbolToDraw);
+
+                int position = (int)(pbSize * percent + 0.5f);
+
+                middleLine.Append(backgroundSymbol);
+
+                for (int i = 0; i < position / drawPattern.Length; i++)
+                {
+                    middleLine.Append(drawPattern);
+                }
+
+                int rest = position % drawPattern.Length;
+                middleLine.Append(drawPattern.Substring(0, rest));
+                middleLine.Append(backgroundSymbol, pbSize - position);
+                middleLine.Append(backgroundSymbol);
+                middleLine.Append(symbolToDraw);
+
+                int py = y;
+                drawBuffer[py] = drawBuffer[py].Remove(x, upBottomline.Length).Insert(x, upBottomline.ToString());
+                py++;
+                drawBuffer[py] = drawBuffer[py].Remove(x, gapLine.Length).Insert(x, gapLine.ToString());
+                for (int j = 0; j < height - 4; j++)
+                {
+                    py++;
+                    drawBuffer[py] = drawBuffer[py].Remove(x, middleLine.Length).Insert(x, middleLine.ToString());
+                }
+                py++;
+                drawBuffer[py] = drawBuffer[py].Remove(x, gapLine.Length).Insert(x, gapLine.ToString());
+                py++;
+                drawBuffer[py] = drawBuffer[py].Remove(x, upBottomline.Length).Insert(x, upBottomline.ToString());
+
+            }
+
+            void drawIcon()
+            {
+                int py = y;
+                int px = x - icon[0].Length;
+
+                foreach (string line in icon)
+                {
+                    string coloredLine = line.Replace('█', symbolToDraw).Replace(' ', SColor.getColor(0, 0, 0));
+                    drawBuffer[py] = drawBuffer[py].Remove(px, line.Length).Insert(px, coloredLine);
+                    ++py;
+                }
+            }
+
+            public void setDrawColor(byte r, byte g, byte b)
+            {
+                symbolToDraw = SColor.getColor(r, g, b);
+            }
+
+            public void setPBColor(SColor from, SColor to)
+            {
+                dynamicPBColor = true;
+                colorFrom = from;
+                colorTo = to;
+            }
+
+
+            void replacePBColor()
+            {
+                if (dynamicPBColor)
+                {
+                    char interpolatedColor = interpolateBetweenColors();
+                    drawPattern = pattern.Replace('*', interpolatedColor);
+                    drawPattern = drawPattern.Replace(' ', backgroundSymbol);
+                }
+                else
+                {
+                    drawPattern = pattern.Replace('*', symbolToDraw);
+                    drawPattern = drawPattern.Replace(' ', backgroundSymbol);
+                }
+            }
+
+            char interpolateBetweenColors()
+            {
+                SColor interpColor = new SColor(0, 0, 0);
+                interpColor.r = (byte)interpolate(colorFrom.r, colorTo.r, percent);
+                interpColor.g = (byte)interpolate(colorFrom.g, colorTo.g, percent);
+                interpColor.b = (byte)interpolate(colorFrom.b, colorTo.b, percent);
+                return interpColor.getColor();
+            }
+
+            public float interpolate(float p1, float p2, float fraction) { return p1 + (p2 - p1) * fraction; }
+
+        }
+
 
         #endregion //Libraries
         #endregion
