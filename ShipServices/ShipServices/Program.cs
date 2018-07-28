@@ -529,9 +529,17 @@ namespace IngameScript
             Dictionary<string, float> inventoryItems;
             List<IMyTextPanel> panelsToShowInventory;
 
-            Dictionary<IMyTextPanel, List<ProgressBar>> progressBars = new Dictionary<IMyTextPanel, List<ProgressBar>>();
+            Dictionary<IMyTextPanel, List<KeyValuePair<InfoType, ProgressBar>>> progressBars = new Dictionary<IMyTextPanel, List<KeyValuePair<InfoType, ProgressBar>>>();
 
             Dictionary<IMyTextPanel, string[]> drawBuffers = new Dictionary<IMyTextPanel, string[]>();
+
+            enum InfoType
+            {
+                Energy,
+                Cargo,
+                Hydrogen,
+                Fuel
+            }
 
             public InfoService()
             {
@@ -573,22 +581,33 @@ namespace IngameScript
                 updateShipInfo();
             }
 
-            static float tempVal = 1.0f;
-
             private void updateShipInfo()
             {
-                tempVal += 0.01f;
-
-                if (tempVal >= 1f)
-                {
-                    tempVal = 0f;
-                }
+                float energy = getEnergyValue();
+                float cargo = getShipCargo();
+                float fuel = getShipFuel();
+                float hydrogen = getHydrogen();
 
                 foreach (var textPanel in progressBars.Keys)
                 {
                     foreach(var pb in progressBars[textPanel])
                     {
-                        pb.setPercent(tempVal);
+                        if (pb.Key == InfoType.Energy)
+                        {
+                            pb.Value.setPercent(energy);
+                        }
+                        else if(pb.Key == InfoType.Cargo)
+                        {
+                            pb.Value.setPercent(cargo);
+                        }
+                        else if(pb.Key == InfoType.Fuel)
+                        {
+                            pb.Value.setPercent(fuel);
+                        }
+                        else if(pb.Key == InfoType.Hydrogen)
+                        {
+                            pb.Value.setPercent(hydrogen);
+                        }
                     }
 
                     textPanel.WritePublicText(String.Empty);
@@ -597,6 +616,81 @@ namespace IngameScript
                         textPanel.WritePublicText(line + "\n", true);
                     }
                 }
+            }
+
+            private float getHydrogen()
+            {
+                var tanks = GetBlocksOfType<IMyGasTank>();
+                float fillRatio = 0f;
+                foreach(var tank in tanks)
+                {
+                    fillRatio += (float)tank.FilledRatio;
+                }
+
+                float count = tanks.Count > 0 ? tanks.Count : 1f;
+
+                return fillRatio / count;
+            }
+
+            private float getShipFuel()
+            {
+                var gasGenerators = GetBlocksOfType<IMyGasGenerator>();
+                float maxCapacity = 0.00000001f;
+                float currentCapacity = 0f;
+                foreach(var generator in gasGenerators)
+                {
+                    currentCapacity += (float)generator.GetInventory().CurrentVolume;
+                    maxCapacity += (float)generator.GetInventory().MaxVolume;
+                }
+
+                return currentCapacity / maxCapacity;
+            }
+
+            private float getShipCargo()
+            {
+                var drills = GetBlocksOfType<IMyShipDrill>();
+                var containers = GetBlocksOfType<IMyCargoContainer>();
+                var connectors = GetBlocksOfType<IMyShipConnector>();
+
+                float maxVolume = 0f;
+                float currentVolume = 0f;
+
+                foreach(var drill in drills)
+                {
+                    currentVolume += (float)drill.GetInventory().CurrentVolume;
+                    maxVolume += (float)drill.GetInventory().MaxVolume;
+                }
+
+                foreach (var container in containers)
+                {
+                    currentVolume += (float)container.GetInventory().CurrentVolume;
+                    maxVolume += (float)container.GetInventory().MaxVolume;
+                }
+
+                foreach (var connector in connectors)
+                {
+                    currentVolume += (float)connector.GetInventory().CurrentVolume;
+                    maxVolume += (float)connector.GetInventory().MaxVolume;
+                }
+
+                return currentVolume / maxVolume;
+            }
+
+            private float getEnergyValue()
+            {
+                var batteries = GetBlocksOfType<IMyBatteryBlock>();
+                float maxCapacity = 0f;
+                float currentCapacity = 0f;
+                foreach(var battery in batteries)
+                {
+                    maxCapacity += battery.MaxStoredPower;
+                    currentCapacity += battery.CurrentStoredPower;
+                }
+
+                if (maxCapacity == 0f)
+                    return 1f;
+
+                return currentCapacity / maxCapacity;
             }
 
             private void updateCargoInfo()
@@ -673,7 +767,7 @@ namespace IngameScript
                     }
                     else
                     {
-                        var list = new List<ProgressBar>();
+                        var list = new List<KeyValuePair<InfoType, ProgressBar>>();
                         createDrawBuffer(textPanel);
                         if (textPanel.CustomData.Contains("Energy"))
                         {
@@ -681,7 +775,8 @@ namespace IngameScript
                             var energyProgressBar = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Energy, 59);
                             energyProgressBar.setDrawColor(0, 7, 0);
                             energyProgressBar.setPBColor(new SColor(7, 0, 0), new SColor(0, 7, 0));
-                            list.Add(energyProgressBar);
+                            KeyValuePair<InfoType, ProgressBar> pair = new KeyValuePair<InfoType, ProgressBar>(InfoType.Energy, energyProgressBar);
+                            list.Add(pair);
                         }
 
                         if (textPanel.CustomData.Contains("Fuel"))
@@ -690,7 +785,8 @@ namespace IngameScript
                             var fuelProgressBar = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Fuel, 59);
                             fuelProgressBar.setDrawColor(0, 5, 5);
                             fuelProgressBar.setPBColor(new SColor(7, 0, 0), new SColor(0, 5, 5));
-                            list.Add(fuelProgressBar);
+                            KeyValuePair<InfoType, ProgressBar> pair = new KeyValuePair<InfoType, ProgressBar>(InfoType.Fuel, fuelProgressBar);
+                            list.Add(pair);
                         }
 
                         if (textPanel.CustomData.Contains("Hydrogen"))
@@ -698,8 +794,9 @@ namespace IngameScript
                             string[] drawBuffer = drawBuffers[textPanel];
                             var hydrogenPB = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Hydrogen, 59);
                             hydrogenPB.setDrawColor(0, 1, 5);
-                            hydrogenPB.setPBColor(new SColor(7, 0, 0), new SColor(0, 1, 5));
-                            list.Add(hydrogenPB);
+                            hydrogenPB.setPBColor(new SColor(0, 0, 2), new SColor(0, 1, 5));
+                            KeyValuePair<InfoType, ProgressBar> pair = new KeyValuePair<InfoType, ProgressBar>(InfoType.Hydrogen, hydrogenPB);
+                            list.Add(pair);
                         }
 
                         if (textPanel.CustomData.Contains("Cargo"))
@@ -708,7 +805,8 @@ namespace IngameScript
                             var cargoPB = new ProgressBar(0, list.Count * 11, ref drawBuffer, Icons.Cargo, 59);
                             cargoPB.setDrawColor(7, 7, 0);
                             cargoPB.setPBColor(new SColor(7, 7, 0), new SColor(7, 0, 0));
-                            list.Add(cargoPB);
+                            KeyValuePair<InfoType, ProgressBar> pair = new KeyValuePair<InfoType, ProgressBar>(InfoType.Cargo, cargoPB);
+                            list.Add(pair);
                         }
 
                         if (progressBars.ContainsKey(textPanel))
